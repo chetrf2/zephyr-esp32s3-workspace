@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Zephyr ESP32-S3 Debug",
+      "type": "cortex-debug",
+      "request": "launch",
+      "servertype": "openocd",
+      "serverpath": "/Users/chet/esp/openocd-esp32/bin/openocd",
+      "executable": "/Users/chet/Library/CloudStorage/Dropbox/ZephyrLearning/clionTry/zephyr-esp32s3-workspace/zephyr-esp32s3-course/build/debug_demo/zephyr/zephyr.elf",
+      "loadFiles": [],
+      "preLaunchCommands": [
+        "set breakpoint auto-hw on",
+        "set remote hardware-breakpoint-limit 6"
+      ],
+      "runToEntryPoint": "main",
+      "projectRoot": "${workspaceFolder}",
+      "device": "ESP32-S3",
+      "configFiles": [
+        "board/esp32s3-builtin.cfg"
+      ],
+      "openocdPreConfigLaunchCommands": [
+        "set ESP_USB_JTAG_SERIAL 0"
+      ],
+      "openOCDLaunchCommands": [
+        "gdb_breakpoint_override hard"
+      ],
+      "gdbPath": "/Users/chet/zephyr-sdk/xtensa-espressif_esp32s3_zephyr-elf/bin/xtensa-espressif_esp32s3_zephyr-elf-gdb",
+      "internalConsoleOptions": "openOnSessionStart"
+    }
+  ]
+}

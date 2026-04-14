@@ -22,8 +22,8 @@ static int draw_reading(float temp_c, float rh)
 
     char line1[32];
     char line2[32];
-    snprintk(line1, sizeof(line1), "Temp: %.1f C", temp_c);
-    snprintk(line2, sizeof(line2), "RH:   %.1f %%", rh);
+    snprintk(line1, sizeof(line1), "Temp: %.1f C", (double)temp_c);
+    snprintk(line2, sizeof(line2), "RH:   %.1f %%", (double)rh);
 
     cfb_print(display, "SHT40 + OLED", 2, 0);
     cfb_print(display, line1, 2, 16);
@@ -104,7 +104,7 @@ int main(void)
 
         if (read_sht40(&temp_c, &rh) == 0)
         {
-            LOG_INF("Temp: %.2f C, RH: %.2f %%", temp_c, rh);
+            LOG_INF("Temp: %.2f C, RH: %.2f %%", (double)temp_c, (double)rh);
             draw_reading(temp_c, rh);
         }
 

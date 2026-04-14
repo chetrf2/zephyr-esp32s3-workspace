@@ -19,6 +19,8 @@ west zephyr-export
 # --- Zephyr Python requirements ---
 # Zephyr tree will be at ./zephyr (inside this workspace) after west update
 pip install -r zephyr/scripts/requirements-base.txt
+# Sysbuild pulls in MCUboot image signing tools, which have extra Python deps.
+pip install -r bootloader/mcuboot/scripts/requirements.txt
 # requirements-build.txt is not present in all versions, so just ensure pyelftools exists
 pip install pyelftools
 

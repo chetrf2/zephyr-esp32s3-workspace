@@ -1,19 +1,56 @@
 #!/usr/bin/env python3
-import argparse, os, platform, subprocess, sys
+import argparse, os, platform, shutil, subprocess, sys
 from pathlib import Path
+
+def build_env():
+    env = os.environ.copy()
+    scripts_dir = Path(sys.prefix) / ("Scripts" if platform.system() == "Windows" else "bin")
+    path_entries = [str(scripts_dir)]
+    existing_path = env.get("PATH", "")
+    if existing_path:
+        path_entries.append(existing_path)
+    env["PATH"] = os.pathsep.join(path_entries)
+    env["VIRTUAL_ENV"] = sys.prefix
+    return env
 
 def run(cmd, cwd=None):
     print("+", " ".join(cmd))
-    subprocess.check_call(cmd, cwd=cwd)
+    subprocess.check_call(cmd, cwd=cwd, env=build_env())
+
+def find_west():
+    west = shutil.which("west")
+    if west:
+        return west
+
+    bin_dir = Path(sys.prefix) / ("Scripts" if platform.system() == "Windows" else "bin")
+    scripts_dir = Path(sys.executable).parent
+    candidates = [bin_dir / "west", scripts_dir / "west"]
+    if platform.system() == "Windows":
+        candidates.extend([
+            bin_dir / "west.exe",
+            bin_dir / "west.cmd",
+            bin_dir / "west.bat",
+            scripts_dir / "west.exe",
+            scripts_dir / "west.cmd",
+            scripts_dir / "west.bat",
+        ])
+
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+
+    sys.exit("west not found. Activate the project venv or install west into the active Python environment.")
 
 def main():
     repo = Path(__file__).resolve().parent.parent
+    west_cmd = find_west()
     p = argparse.ArgumentParser()
     p.add_argument("--app", default="welcome")
     p.add_argument("--board", default="esp32s3_devkitc/esp32s3/procpu")
     p.add_argument("--overlay", default="boards/esp32s3_devkitc.overlay")
     p.add_argument("--build-dir", default="")
     p.add_argument("--clean", action="store_true")
+    p.add_argument("--sysbuild", action="store_true")
     p.add_argument("--flash", action="store_true")
     p.add_argument("--monitor", action="store_true")
     p.add_argument("--debug", action="store_true")
@@ -31,6 +68,7 @@ def main():
             run(["rm","-rf", str(build)])
 
     prj_conf = src / "prj.conf"
+    sysbuild_conf = src / "sysbuild.conf"
     conf_files = [str(prj_conf.resolve().as_posix())]
     secrets = src / "wifi_secrets.conf"
     wants_wifi = False
@@ -50,17 +88,27 @@ def main():
             print(f"+ created {secrets}")
         conf_files.append(str(secrets.resolve().as_posix()))
 
-    west = ["west","build","-p","always","-b",args.board,"-d",str(build),str(src),
-            "--", f"-DDTC_OVERLAY_FILE={args.overlay}",
-            f"-DCONF_FILE={';'.join(conf_files)}"]
+    west = [west_cmd, "build", "-p", "always", "-b", args.board, "-d", str(build)]
+    if args.sysbuild:
+        west.append("--sysbuild")
+    west.extend([
+        str(src),
+        "--",
+        f"-DDTC_OVERLAY_FILE={args.overlay}",
+        f"-DCONF_FILE={';'.join(conf_files)}",
+    ])
+    if args.sysbuild and sysbuild_conf.exists():
+        west.append(f"-DSB_CONF_FILE={sysbuild_conf.resolve().as_posix()}")
     run(west, cwd=repo)
 
     if args.flash:
-        cmd = ["west","flash","-d",str(build)]
+        cmd = [west_cmd,"flash","-d",str(build)]
         if args.port: cmd += ["--esp-device", args.port]
         run(cmd, cwd=repo)
 
     elf = build / "zephyr" / "zephyr.elf"
+    if args.sysbuild:
+        elf = build / args.app / "zephyr" / "zephyr.elf"
     if args.debug:
         if not elf.exists():
             sys.exit(f"ELF not found: {elf}")
@@ -79,7 +127,7 @@ def main():
     if args.monitor:
         if not build.exists():
             sys.exit(f"Build dir not found: {build}")
-        cmd = ["west", "espressif", "monitor"]
+        cmd = [west_cmd, "espressif", "monitor"]
         if args.port:
             cmd += ["-p", args.port]
         run(cmd, cwd=build)
@@ -94,6 +142,7 @@ if __name__ == "__main__":
 # Usage
 # --app <name>       Required. The application folder inside apps/
 # --clean            Deletes the build directory before rebuilding
+# --sysbuild         Build with sysbuild so MCUboot and the app are built together
 # --flash            Flash the firmware to the ESP32S3 after building
 # --monitor          Open Espressif’s serial monitor after flashing
 # --port <port>      Specify USB/serial port (COMx on Windows, /dev/ttyUSBx on Linux)
@@ -102,7 +151,9 @@ if __name__ == "__main__":
 # --overlay <file>   Optional overlay; defaults to app’s boards/*.overlay if present
 
 # python scripts/build.py --app welcome --clean
+# python scripts/build.py --app welcome --sysbuild --clean
 # python scripts/build.py --app welcome --clean --flash
+# python scripts/build.py --app welcome --sysbuild --clean --flash
 # python scripts/build.py --app welcome --flash --monitor --port /dev/ttyUSB0
 # python scripts\build.py --app welcome --flash --monitor --port COM12
 # python scripts/build.py --app welcome --flash --monitor --port /dev/ttyACM0

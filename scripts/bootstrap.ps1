@@ -22,6 +22,7 @@ west zephyr-export
 # --- Zephyr Python requirements ---
 # Zephyr tree will be at .\zephyr after west update
 pip install -r zephyr\scripts\requirements-base.txt
+pip install -r bootloader\mcuboot\scripts\requirements.txt
 pip install pyelftools
 
 # --- Verify SDK ---

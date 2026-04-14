@@ -1,0 +1,6 @@
+{
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/zephyr-esp32s3-course/build/oled_ssd1306/compile_commands.json",
+  "C_Cpp.default.forcedInclude": [
+    "${workspaceFolder}/zephyr-esp32s3-course/build/oled_ssd1306/zephyr/include/generated/zephyr/autoconf.h"
+  ]
+}

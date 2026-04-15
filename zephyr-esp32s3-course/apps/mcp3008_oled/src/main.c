@@ -62,7 +62,7 @@ static void update_display(uint8_t channel, uint16_t value)
 	snprintk(line2, sizeof(line2), "CH%u", channel);
 	snprintk(line3, sizeof(line3), "VAL %4u", value);
 
-	cfb_framebuffer_clear(display, true);
+	// cfb_framebuffer_clear(display, true);
 	cfb_print(display, line1, 2, y0);
 	cfb_print(display, line2, 2, y1);
 	cfb_print(display, line3, 2, y2);
@@ -99,6 +99,7 @@ int main(void)
 	uint16_t last_value = 0;
 	int64_t last_update_ms = 0;
 	bool last_pressed = false;
+	bool channel_changed = false;
 
 	if (read_mcp3008(channel, &value) == 0) {
 		LOG_INF("MCP3008: CH%u = %u", channel, value);
@@ -119,16 +120,18 @@ int main(void)
 
 		if (pressed && !last_pressed) {
 			channel = (channel + 1) % 8;
+			channel_changed = true;
 		}
 		last_pressed = pressed;
 
 		int64_t now_ms = k_uptime_get();
 		if ((now_ms - last_update_ms) >= UPDATE_INTERVAL_MS) {
 			if (read_mcp3008(channel, &value) == 0) {
-				if (value != last_value) {
+				if (value != last_value || channel_changed) {
 					LOG_INF("MCP3008: CH%u = %u", channel, value);
 					update_display(channel, value);
 					last_value = value;
+					channel_changed = false;
 				}
 			} else {
 				LOG_WRN("MCP3008 read failed");

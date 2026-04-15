@@ -9,24 +9,31 @@
 #include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/util.h>
+#include <errno.h>
 #include <string.h>
 
 LOG_MODULE_REGISTER(web_welcome, LOG_LEVEL_INF);
 
 #define HTTP_PORT 80
+#define WIFI_CONNECT_RETRIES 10
+#define WIFI_CONNECT_RETRY_DELAY_MS 500
+#define WIFI_CONNECT_TIMEOUT_S 15
+#define IPV4_READY_TIMEOUT_S 30
 
 static struct net_mgmt_event_callback wifi_cb;
 static struct net_mgmt_event_callback ipv4_cb;
 
-static K_SEM_DEFINE(wifi_connected, 0, 1);
+static K_SEM_DEFINE(wifi_connect_result, 0, 1);
 static K_SEM_DEFINE(ipv4_ready, 0, 1);
+static int wifi_connect_status = -EINPROGRESS;
 
 #define LED0_NODE DT_ALIAS(led0)
 static const struct gpio_dt_spec led0 = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 
-#define READY_BLINK_COUNT 3
-#define READY_BLINK_ON_MS 300
-#define READY_BLINK_OFF_MS 300
+#define READY_BLINK_COUNT 6
+#define READY_BLINK_ON_MS 200
+#define READY_BLINK_OFF_MS 200
+#define HEARTBEAT_BLINK_INTERVAL_MS 750
 
 static const uint8_t index_html[] =
 "<!doctype html>\n"
@@ -153,13 +160,16 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb,
 		return;
 	}
 
+	wifi_connect_status = status->status;
+
 	if (status->status) {
 		LOG_ERR("Wi-Fi connect failed (%d)", status->status);
+		k_sem_give(&wifi_connect_result);
 		return;
 	}
 
 	LOG_INF("Wi-Fi connected");
-	k_sem_give(&wifi_connected);
+	k_sem_give(&wifi_connect_result);
 }
 
 static void ipv4_event_handler(struct net_mgmt_event_callback *cb,
@@ -192,6 +202,7 @@ static int connect_wifi_and_wait_for_ip(void)
 {
 	struct net_if *iface = net_if_get_default();
 	struct wifi_connect_req_params params = { 0 };
+	int attempts = WIFI_CONNECT_RETRIES;
 	int ret;
 
 	if (iface == NULL) {
@@ -211,22 +222,56 @@ static int connect_wifi_and_wait_for_ip(void)
 	params.ssid_length = strlen(CONFIG_WIFI_CREDENTIALS_STATIC_SSID);
 	params.psk = CONFIG_WIFI_CREDENTIALS_STATIC_PASSWORD;
 	params.psk_length = strlen(CONFIG_WIFI_CREDENTIALS_STATIC_PASSWORD);
+	params.band = WIFI_FREQ_BAND_UNKNOWN;
+	params.channel = WIFI_CHANNEL_ANY;
+	params.mfp = WIFI_MFP_OPTIONAL;
 	params.security = WIFI_SECURITY_TYPE_PSK;
 
 	LOG_INF("Connecting to Wi-Fi SSID \"%s\"...", CONFIG_WIFI_CREDENTIALS_STATIC_SSID);
 
 	net_if_up(iface);
-	ret = net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &params, sizeof(params));
-	if (ret < 0) {
-		LOG_ERR("Wi-Fi connect request failed (%d)", ret);
-		return ret;
+
+	while (k_sem_take(&wifi_connect_result, K_NO_WAIT) == 0) {
+	}
+	while (k_sem_take(&ipv4_ready, K_NO_WAIT) == 0) {
 	}
 
-	k_sem_take(&wifi_connected, K_FOREVER);
+	while (attempts-- > 0) {
+		wifi_connect_status = -EINPROGRESS;
+		ret = net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &params, sizeof(params));
+		if (ret < 0) {
+			LOG_WRN("Wi-Fi connect request failed (%d), retrying...", ret);
+			k_msleep(WIFI_CONNECT_RETRY_DELAY_MS);
+			continue;
+		}
+
+		ret = k_sem_take(&wifi_connect_result, K_SECONDS(WIFI_CONNECT_TIMEOUT_S));
+		if (ret < 0) {
+			LOG_WRN("Timed out waiting for Wi-Fi connect result, retrying...");
+			k_msleep(WIFI_CONNECT_RETRY_DELAY_MS);
+			continue;
+		}
+
+		if (wifi_connect_status == 0) {
+			break;
+		}
+
+		LOG_WRN("Wi-Fi connection attempt failed (%d), retrying...",
+			wifi_connect_status);
+		k_msleep(WIFI_CONNECT_RETRY_DELAY_MS);
+	}
+
+	if (wifi_connect_status != 0) {
+		return wifi_connect_status < 0 ? wifi_connect_status : -EIO;
+	}
 
 	LOG_INF("Starting DHCPv4...");
 	net_dhcpv4_start(iface);
-	k_sem_take(&ipv4_ready, K_FOREVER);
+	ret = k_sem_take(&ipv4_ready, K_SECONDS(IPV4_READY_TIMEOUT_S));
+	if (ret < 0) {
+		LOG_ERR("Timed out waiting for DHCPv4 address");
+		return ret;
+	}
 
 	return 0;
 }
@@ -258,6 +303,12 @@ int main(void)
 		blink_ready();
 		LOG_INF("Starting HTTP server on port %u", web_port);
 		http_server_start();
+
+		/* Heartbeat blink while server runs */
+		while (1) {
+			gpio_pin_toggle_dt(&led0);
+			k_msleep(HEARTBEAT_BLINK_INTERVAL_MS);
+		}
 	}
 
 	return 0;

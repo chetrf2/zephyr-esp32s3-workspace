@@ -8,6 +8,7 @@
 #include <zephyr/net/http/service.h>
 #include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 #include <errno.h>
 #include <string.h>
@@ -26,6 +27,7 @@ static struct net_mgmt_event_callback ipv4_cb;
 static K_SEM_DEFINE(wifi_connect_result, 0, 1);
 static K_SEM_DEFINE(ipv4_ready, 0, 1);
 static int wifi_connect_status = -EINPROGRESS;
+static atomic_t network_live;
 
 #define LED0_NODE DT_ALIAS(led0)
 static const struct gpio_dt_spec led0 = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
@@ -156,6 +158,12 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb,
 
 	ARG_UNUSED(iface);
 
+	if (mgmt_event == NET_EVENT_WIFI_DISCONNECT_RESULT) {
+		atomic_clear(&network_live);
+		LOG_WRN("Wi-Fi disconnected");
+		return;
+	}
+
 	if (mgmt_event != NET_EVENT_WIFI_CONNECT_RESULT) {
 		return;
 	}
@@ -179,6 +187,12 @@ static void ipv4_event_handler(struct net_mgmt_event_callback *cb,
 
 	ARG_UNUSED(cb);
 
+	if (mgmt_event == NET_EVENT_IPV4_ADDR_DEL) {
+		atomic_clear(&network_live);
+		LOG_WRN("IPv4 address lost");
+		return;
+	}
+
 	if (mgmt_event != NET_EVENT_IPV4_ADDR_ADD) {
 		return;
 	}
@@ -193,6 +207,7 @@ static void ipv4_event_handler(struct net_mgmt_event_callback *cb,
 				      &iface->config.ip.ipv4->unicast[i].ipv4.address.in_addr,
 				      addr_buf, sizeof(addr_buf)));
 		LOG_INF("Browser: http://%s/", addr_buf);
+		atomic_set(&network_live, 1);
 		k_sem_give(&ipv4_ready);
 		break;
 	}
@@ -211,11 +226,13 @@ static int connect_wifi_and_wait_for_ip(void)
 	}
 
 	net_mgmt_init_event_callback(&wifi_cb, wifi_event_handler,
-				     NET_EVENT_WIFI_CONNECT_RESULT);
+				     NET_EVENT_WIFI_CONNECT_RESULT |
+				     NET_EVENT_WIFI_DISCONNECT_RESULT);
 	net_mgmt_add_event_callback(&wifi_cb);
 
 	net_mgmt_init_event_callback(&ipv4_cb, ipv4_event_handler,
-				     NET_EVENT_IPV4_ADDR_ADD);
+				     NET_EVENT_IPV4_ADDR_ADD |
+				     NET_EVENT_IPV4_ADDR_DEL);
 	net_mgmt_add_event_callback(&ipv4_cb);
 
 	params.ssid = CONFIG_WIFI_CREDENTIALS_STATIC_SSID;
@@ -230,6 +247,7 @@ static int connect_wifi_and_wait_for_ip(void)
 	LOG_INF("Connecting to Wi-Fi SSID \"%s\"...", CONFIG_WIFI_CREDENTIALS_STATIC_SSID);
 
 	net_if_up(iface);
+	atomic_clear(&network_live);
 
 	while (k_sem_take(&wifi_connect_result, K_NO_WAIT) == 0) {
 	}
@@ -304,9 +322,14 @@ int main(void)
 		LOG_INF("Starting HTTP server on port %u", web_port);
 		http_server_start();
 
-		/* Heartbeat blink while server runs */
+		/* Heartbeat blinks only while the network is live. */
 		while (1) {
-			gpio_pin_toggle_dt(&led0);
+			if (atomic_get(&network_live)) {
+				gpio_pin_toggle_dt(&led0);
+			} else {
+				gpio_pin_set_dt(&led0, 0);
+			}
+
 			k_msleep(HEARTBEAT_BLINK_INTERVAL_MS);
 		}
 	}

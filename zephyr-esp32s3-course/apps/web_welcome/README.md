@@ -15,6 +15,13 @@ If your network is open, change the security type in `prj.conf` to:
 CONFIG_WIFI_CREDENTIALS_STATIC_TYPE_OPEN=y
 ```
 
+## Prerequisites
+The Espressif HAL binary blobs (required for Wi-Fi) must be present. If you
+haven't fetched them yet, run this once from the workspace root:
+```bash
+west blobs fetch hal_espressif
+```
+
 ## Build/flash
 ```bash
 python scripts/build.py --app web_welcome --clean --flash --monitor --port <COMx-or-/dev/ttyUSBx>

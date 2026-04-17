@@ -163,6 +163,10 @@ static const uint8_t index_html[] =
 "      <div id=\"rh\" class=\"value\">--.- %</div>\n"
 "    </div>\n"
 "    <div class=\"card\">\n"
+"      <h2>US-100 Distance</h2>\n"
+"      <div id=\"distance\" class=\"value\">---- mm</div>\n"
+"    </div>\n"
+"    <div class=\"card\">\n"
 "      <h2>ADC Channels</h2>\n"
 "      <div id=\"adc\" class=\"adc\"></div>\n"
 "    </div>\n"
@@ -186,6 +190,7 @@ static const uint8_t index_html[] =
 "      const data = await res.json();\n"
 "      document.getElementById('temp').textContent = data.temp_c.toFixed(1) + ' C';\n"
 "      document.getElementById('rh').textContent = data.rh.toFixed(1) + ' %';\n"
+"      document.getElementById('distance').textContent = (data.distance_mm ?? 0) + ' mm';\n"
 "      const adc = data.adc || [];\n"
 "      document.getElementById('adc').innerHTML = adc.map((v,i)=>`CH${i}: ${v}`).join('<br/>');\n"
 "    }\n"
@@ -351,8 +356,9 @@ static int telemetry_handler(struct http_client_ctx *client, enum http_data_stat
 
 	ret = snprintk(
 		body, sizeof(body),
-		"{\"temp_c\":%.1f,\"rh\":%.1f,\"adc\":[%u,%u,%u,%u,%u,%u,%u,%u]}",
+		"{\"temp_c\":%.1f,\"rh\":%.1f,\"distance_mm\":%u,\"adc\":[%u,%u,%u,%u,%u,%u,%u,%u]}",
 		(double)temp_c, (double)rh,
+		distance_mm,
 		adc[0], adc[1], adc[2], adc[3],
 		adc[4], adc[5], adc[6], adc[7]);
 

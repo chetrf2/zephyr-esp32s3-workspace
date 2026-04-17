@@ -1,0 +1,36 @@
+{
+  "configurations": [
+    {
+      "name": "Zephyr ESP32-S3",
+      "includePath": [
+        "${workspaceFolder}/zephyr/include",
+        "${workspaceFolder}/zephyr/lib/libc/newlib/include",
+        "${workspaceFolder}/zephyr/soc/espressif",
+        "${workspaceFolder}/zephyr-esp32s3-course/build/web_controller/zephyr/include/generated",
+        "${workspaceFolder}/modules/**",
+        "${workspaceFolder}/zephyr-esp32s3-course/build/**/zephyr/include/generated",
+        "/Users/chet/zephyr-sdk/xtensa-espressif_esp32s3_zephyr-elf/lib/gcc/xtensa-espressif_esp32s3_zephyr-elf/11.1.0/include",
+        "/Users/chet/zephyr-sdk/xtensa-espressif_esp32s3_zephyr-elf/xtensa-espressif_esp32s3_zephyr-elf/include"
+      ],
+      "defines": [
+        "__ZEPHYR__",
+        "__ets__",
+        "ESP_PLATFORM",
+        "__LINUX_ERRNO_EXTENSIONS__",
+        "_ANSI_SOURCE",
+        "KERNEL"
+      ],
+      "compileCommands": "${workspaceFolder}/zephyr-esp32s3-course/build/web_controller/compile_commands.json",
+      "intelliSenseMode": "gcc-x86",
+      "cStandard": "c99",
+      "cppStandard": "c++17",
+      "browse": {
+        "path": [
+          "${workspaceFolder}"
+        ],
+        "limitSymbolsToIncludedHeaders": false
+      }
+    }
+  ],
+  "version": 4
+}

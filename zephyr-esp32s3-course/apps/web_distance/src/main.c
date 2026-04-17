@@ -12,6 +12,8 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/spi.h>
 #include <zephyr/drivers/uart.h>
+#include <zephyr/drivers/display.h>
+#include <zephyr/display/cfb.h>
 #include <zephyr/data/json.h>
 #include <string.h>
 
@@ -19,6 +21,7 @@ LOG_MODULE_REGISTER(web_distance, LOG_LEVEL_INF);
 
 #define HTTP_PORT 80
 #define ADC_CHANNELS 8
+#define TELEMETRY_INTERVAL_MS 250
 #define WIFI_CONNECT_TIMEOUT K_SECONDS(15)
 #define IPV4_READY_TIMEOUT K_SECONDS(20)
 #define WIFI_CONNECT_RETRIES 3
@@ -74,6 +77,8 @@ static const struct spi_dt_spec mcp3008 = SPI_DT_SPEC_GET(
 	DT_NODELABEL(mcp3008),
 	SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_TRANSFER_MSB,
 	0);
+static const struct device *const oled = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
+static bool oled_ready;
 
 static const uint8_t index_html[] =
 "<!doctype html>\n"
@@ -326,6 +331,27 @@ static int read_adc_all(uint16_t *values, size_t count)
 	return 0;
 }
 
+static void oled_update_telemetry(uint16_t distance_mm, float temp_c, float rh)
+{
+	if (!oled_ready) {
+		return;
+	}
+
+	char line1[32];
+	char line2[32];
+	char line3[32];
+
+	snprintk(line1, sizeof(line1), "Dst:%u mm", distance_mm);
+	snprintk(line2, sizeof(line2), "Tmp:%4.1f C", (double)temp_c);
+	snprintk(line3, sizeof(line3), "Hum:%4.1f %%", (double)rh);
+
+	// cfb_framebuffer_clear(oled, true);
+	cfb_print(oled, line1, 0, 0);
+	cfb_print(oled, line2, 0, 16);
+	cfb_print(oled, line3, 0, 32);
+	cfb_framebuffer_finalize(oled);
+}
+
 static int telemetry_handler(struct http_client_ctx *client, enum http_data_status status,
 			     uint8_t *buffer, size_t len, struct http_response_ctx *response_ctx,
 			     void *user_data)
@@ -360,6 +386,7 @@ static int telemetry_handler(struct http_client_ctx *client, enum http_data_stat
 		LOG_WRN("US-100 read failed");
 		distance_mm = 0;
 	}
+	oled_update_telemetry(distance_mm, temp_c, rh);
 
 	ret = snprintk(
 		body, sizeof(body),
@@ -609,6 +636,30 @@ static void init_us100(void)
 	LOG_INF("US-100: ready on uart1 (GPIO4=TX, GPIO5=RX)");
 }
 
+static void init_oled(void)
+{
+	if (!device_is_ready(oled)) {
+		LOG_WRN("OLED display not ready");
+		return;
+	}
+
+	if (display_set_pixel_format(oled, PIXEL_FORMAT_MONO01) < 0) {
+		LOG_WRN("OLED pixel format set failed");
+	}
+	if (display_blanking_off(oled) < 0) {
+		LOG_WRN("OLED unblank failed");
+	}
+	if (cfb_framebuffer_init(oled) < 0) {
+		LOG_WRN("OLED framebuffer init failed");
+		return;
+	}
+
+	cfb_framebuffer_set_font(oled, 0);
+	oled_ready = true;
+	oled_update_telemetry(0, 0.0f, 0.0f);
+	LOG_INF("OLED display ready");
+}
+
 static void init_leds(void)
 {
 	if (gpio_is_ready_dt(&led0)) {
@@ -623,6 +674,7 @@ int main(void)
 {
 	init_leds();
 	init_us100();
+	init_oled();
 
 	if (!device_is_ready(sht40)) {
 		LOG_WRN("SHT40 not ready");

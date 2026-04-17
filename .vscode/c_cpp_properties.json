@@ -20,8 +20,8 @@
         "_ANSI_SOURCE",
         "KERNEL"
       ],
-      "compileCommands": "${workspaceFolder}/zephyr-esp32s3-course/build/web_controller/compile_commands.json",
-      "intelliSenseMode": "gcc-x86",
+      "compileCommands": "${workspaceFolder}/zephyr-esp32s3-course/build/web_distance/compile_commands.json",
+      "intelliSenseMode": "gcc-arm",
       "cStandard": "c99",
       "cppStandard": "c++17",
       "browse": {

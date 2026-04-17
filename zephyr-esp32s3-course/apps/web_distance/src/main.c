@@ -11,6 +11,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/spi.h>
+#include <zephyr/drivers/uart.h>
 #include <zephyr/data/json.h>
 #include <string.h>
 
@@ -22,11 +23,53 @@ LOG_MODULE_REGISTER(web_distance, LOG_LEVEL_INF);
 #define IPV4_READY_TIMEOUT K_SECONDS(20)
 #define WIFI_CONNECT_RETRIES 3
 
+#define US100_TRIGGER          0x55
+#define US100_REPLY_BYTES      2
+#define US100_RX_TIMEOUT_MS    100
+#define US100_POLL_INTERVAL_MS 500
+
+#define US100_STACK_SIZE       1024
+#define US100_THREAD_PRIORITY  5
+
+K_THREAD_STACK_DEFINE(us100_stack, US100_STACK_SIZE);
+static struct k_thread us100_thread_data;
+
+/* Shared state between ISR callback and thread */
+static K_SEM_DEFINE(us100_rx_sem, 0, 1);
+static uint8_t  us100_rx_buf[US100_REPLY_BYTES];
+static uint8_t  us100_rx_count;
+
+static void us100_uart_isr(const struct device *dev, void *user_data)
+{
+	ARG_UNUSED(user_data);
+
+	if (!uart_irq_update(dev)) {
+		return;
+	}
+
+	while (uart_irq_rx_ready(dev)) {
+		uint8_t c;
+
+		if (uart_fifo_read(dev, &c, 1) != 1) {
+			break;
+		}
+
+		if (us100_rx_count < US100_REPLY_BYTES) {
+			us100_rx_buf[us100_rx_count++] = c;
+		}
+
+		if (us100_rx_count == US100_REPLY_BYTES) {
+			k_sem_give(&us100_rx_sem);
+		}
+	}
+}
+
 static struct net_mgmt_event_callback wifi_cb;
 static struct net_mgmt_event_callback ipv4_cb;
 
 static K_SEM_DEFINE(wifi_connected, 0, 1);
 static K_SEM_DEFINE(ipv4_ready, 0, 1);
+static K_SEM_DEFINE(net_ready, 0, 1);
 static int wifi_connect_result;
 
 #define LED0_NODE DT_ALIAS(led0)
@@ -519,6 +562,53 @@ static int connect_wifi_and_wait_for_ip(void)
 	return -ETIMEDOUT;
 }
 
+static void us100_thread(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	const struct device *uart = DEVICE_DT_GET(DT_NODELABEL(uart1));
+
+	if (!device_is_ready(uart)) {
+		LOG_ERR("US-100: uart1 not ready");
+		return;
+	}
+
+	/* Register ISR and enable RX interrupts — no more polling */
+	uart_irq_callback_user_data_set(uart, us100_uart_isr, NULL);
+	uart_irq_rx_enable(uart);
+
+	/* Wait until Wi-Fi + DHCP are up before taking measurements */
+	LOG_INF("US-100: waiting for network...");
+	k_sem_take(&net_ready, K_FOREVER);
+	LOG_INF("US-100: sensor thread started on uart1 (GPIO4=TX, GPIO5=RX, IRQ-driven)");
+
+	while (1) {
+		/* Reset RX state, then send trigger */
+		us100_rx_count = 0;
+		k_sem_reset(&us100_rx_sem);
+
+		uart_poll_out(uart, US100_TRIGGER);
+
+		/* Sleep until ISR signals 2 bytes have arrived, or timeout */
+		int ret = k_sem_take(&us100_rx_sem, K_MSEC(US100_RX_TIMEOUT_MS));
+
+		if (ret == 0) {
+			uint16_t distance_mm =
+				((uint16_t)us100_rx_buf[0] << 8) | us100_rx_buf[1];
+
+			LOG_INF("US-100 distance: %u mm", distance_mm);
+		} else {
+			LOG_WRN("US-100: timeout waiting for reply (%u/2 bytes)",
+				 us100_rx_count);
+		}
+
+		/* Wait before next measurement; thread is fully idle here */
+		k_sleep(K_MSEC(US100_POLL_INTERVAL_MS));
+	}
+}
+
 static void init_leds(void)
 {
 	if (gpio_is_ready_dt(&led0)) {
@@ -540,7 +630,13 @@ int main(void)
 		LOG_WRN("MCP3008 not ready");
 	}
 
+	k_thread_create(&us100_thread_data, us100_stack, K_THREAD_STACK_SIZEOF(us100_stack),
+			us100_thread, NULL, NULL, NULL,
+			US100_THREAD_PRIORITY, 0, K_NO_WAIT);
+	k_thread_name_set(&us100_thread_data, "us100");
+
 	if (connect_wifi_and_wait_for_ip() == 0) {
+		k_sem_give(&net_ready);
 		LOG_INF("Starting HTTP server on port %u", web_port);
 		http_server_start();
 	}

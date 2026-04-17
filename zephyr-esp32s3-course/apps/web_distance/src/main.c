@@ -203,7 +203,7 @@ static const uint8_t index_html[] =
 "        body: JSON.stringify({ led: idx, state: state[key] ? 1 : 0 })\n"
 "      });\n"
 "    }\n"
-"    setInterval(fetchTelemetry, 1000);\n"
+"    setInterval(fetchTelemetry, 250);\n"
 "    fetchTelemetry();\n"
 "  </script>\n"
 "</body>\n"
